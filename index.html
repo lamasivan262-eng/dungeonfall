@@ -35,7 +35,7 @@
     #vignette {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
       background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 120%);
-      pointer-events: none; z-index: 2;
+      pointer-events: none; z-index: 2; transition: background 0.3s ease;
     }
 
     /* --- GLASSMORPHISM UI CLASSES --- */
@@ -91,6 +91,7 @@
     }
     #hp-fill { background: linear-gradient(90deg, #990033, var(--health)); box-shadow: 0 0 10px var(--health); }
     #xp-fill { background: linear-gradient(90deg, #006666, var(--xp)); width: 0%; box-shadow: 0 0 10px var(--xp); }
+    #anxiety-fill { background: linear-gradient(90deg, #660033, var(--accent)); width: 0%; box-shadow: 0 0 10px var(--accent); }
     
     .bar-text {
       position: absolute; width: 100%; text-align: center; top: 50%;
@@ -199,6 +200,52 @@
     .won { color: var(--gold); text-shadow: 0 0 30px rgba(255,184,0,0.6); }
     .end-stats { font-size: 20px; color: var(--text-dim); margin-bottom: 40px; }
 
+/* --- ULTRA EPIC MAX UPGRADE ANIMATION --- */
+@keyframes ultraEpicMax {
+  0% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+  20% { transform: scale(1.14) rotate(-2deg); filter: brightness(1.9); background: rgba(255, 215, 0, 0.35); border-color: #fff; box-shadow: 0 0 60px #ffd700, inset 0 0 30px #ffd700; }
+  40% { transform: scale(0.94) rotate(2deg); filter: brightness(1.4); }
+  60% { transform: scale(1.06) rotate(-1deg); filter: brightness(1.7); box-shadow: 0 0 45px #ffb800, inset 0 0 20px #ffb800; }
+  80% { transform: scale(0.98) rotate(0.5deg); }
+  100% { transform: scale(1) rotate(0deg); filter: brightness(1); box-shadow: 0 0 25px rgba(255, 184, 0, 0.8); }
+}
+
+.ultra-max-anim {
+  animation: ultraEpicMax 0.9s cubic-bezier(0.25, 1.5, 0.5, 1) forwards;
+  position: relative;
+}
+
+/* Shimmering holographic light sweep across the badge */
+@keyframes badgeShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.max-badge-pop {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%) scale(0);
+  background: linear-gradient(90deg, #ff8c00, #ffd700, #ffffff, #ffd700, #ff8c00);
+  background-size: 200% auto;
+  color: #000;
+  font-weight: 900;
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  box-shadow: 0 0 25px rgba(255, 215, 0, 0.9), 0 0 10px rgba(255, 255, 255, 0.8);
+  animation: badgePop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards, badgeShimmer 2.5s linear infinite;
+  z-index: 20;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+@keyframes badgePop {
+  0% { transform: translateX(-50%) scale(0) translateY(20px); opacity: 0; }
+  60% { transform: translateX(-50%) scale(1.3) translateY(-6px); opacity: 1; }
+  100% { transform: translateX(-50%) scale(1) translateY(0); opacity: 1; }
+}
   </style>
 </head>
 <body>
@@ -218,7 +265,6 @@
     <button class="btn" style="font-size: 12px; padding: 8px;" onclick="adminSpeedBoost()">Speed Boost</button>
     <button class="btn" style="font-size: 12px; padding: 8px;" onclick="adminSkipFloor()">Kill All Enemies</button>
     <button class="btn" style="font-size: 12px; padding: 8px;" onclick="adminNextFloor()">Skip to Next Floor</button>
-    <div style="font-size: 10px; color: var(--text-dim); text-align: center; margin-top: 5px;">Press <strong>Alt+Shift+Enter</strong> to toggle</div>
   </div>
 
   <!-- IN-GAME HUD -->
@@ -234,6 +280,11 @@
         <div class="bar-bg" style="height: 16px;">
           <div class="bar-fill" id="xp-fill"></div>
           <div class="bar-text" id="xp-text" style="font-size:10px;">XP 0 / 10</div>
+        </div>
+        <!-- Anxiety Bar (Appears after 1m 40s) -->
+        <div class="bar-bg" id="anxiety-bar-container" style="display: none; height: 16px; border-color: rgba(255, 0, 85, 0.4);">
+          <div class="bar-fill" id="anxiety-fill"></div>
+          <div class="bar-text" id="anxiety-text" style="font-size:10px;">ANXIETY 0%</div>
         </div>
         
         <div class="hud-counters">
@@ -389,6 +440,58 @@ let lastTime = 0;
 let gold = parseInt(localStorage.getItem('df_gold')) || 0;
 let claimedCode = localStorage.getItem('df_claimed_code') === 'true';
 let cinematicTimer = 0;
+let floorTime = 0; // Tracks time spent on the current floor
+
+// --- AUDIO MANAGER (Dropbox Hosted - Standard Playback) ---
+const bgmFiles = {
+  floor2: new Audio('https://www.dropbox.com/scl/fi/c5o2cwvksjj50ry48mttx/dungeonfall-floor2.mp3?rlkey=g6i8icki7irtqjan7zgs5ngfp&st=pgap2o7s&raw=1'),
+  floor3: new Audio('https://www.dropbox.com/scl/fi/kyv900y5bqpjf4bj3wqp6/dungeonfall-floor3.mp3?rlkey=xa2dz19yrqxk443an50vu1wdx&st=ruxhi95v&raw=1'),
+  floor3Rare: new Audio('https://www.dropbox.com/scl/fi/9g0iqls0jziyud4kylnfu/dungeonfall-floor3-alternative-secret.mp3?rlkey=7j5aem145zv00oqs34yj7vhhq&st=aaktzhux&raw=1')
+};
+
+Object.values(bgmFiles).forEach(audio => {
+  audio.loop = true;
+  audio.volume = 0.7;
+});
+
+let currentBGM = null;
+
+function playMusic(track) {
+  if (currentBGM === track) {
+    if (currentBGM.paused) currentBGM.play().catch(err => {});
+    return;
+  }
+  if (currentBGM) {
+    currentBGM.pause();
+    currentBGM.currentTime = 0;
+  }
+  currentBGM = track;
+  if (currentBGM) {
+    currentBGM.play().catch(err => {
+      console.log("Audio autoplay prevented:", err);
+    });
+  }
+}
+
+function updateAudioMuffle(isMuffled) {
+  // Disabled for Dropbox links to prevent CORS crashes
+}
+
+function pauseMusic() {
+  if (currentBGM) currentBGM.pause();
+}
+
+function resumeMusic() {
+  if (currentBGM) currentBGM.play().catch(err => {});
+}
+
+function stopMusic() {
+  if (currentBGM) {
+    currentBGM.pause();
+    currentBGM.currentTime = 0;
+    currentBGM = null;
+  }
+}
 
 // --- CUTSCENE LORE DATA ---
 const introLore = [
@@ -722,8 +825,15 @@ class Player {
   }
 
   get dmg() { return Math.floor(this.baseDmg * this.dmgMult); }
-  get speed() { return this.baseSpeed * this.speedMult; }
 
+  get speed() { 
+    let baseSpeedVal = this.baseSpeed * this.speedMult;
+    let hpRatio = this.hp / this.maxHp;
+    if (hpRatio < 0.3) {
+      return baseSpeedVal * 0.75; // 25% slower when wounded
+    }
+    return baseSpeedVal; 
+  }
   update(dt) {
     if (this.dashTimer > 0) this.dashTimer -= dt;
     if (this.attackTimer > 0) this.attackTimer -= dt;
@@ -744,12 +854,18 @@ class Player {
       this.vx = dx * this.speed;
       this.vy = dy * this.speed;
 
-      if (keys['Space'] && this.dashTimer <= 0 && (dx!==0 || dy!==0)) {
+if (keys['Space'] && this.dashTimer <= 0 && (dx!==0 || dy!==0)) {
         this.isDashing = true;
         this.dashTimer = this.dashCooldownMax;
         this.dashDuration = this.dashTime;
         this.iframes = this.dashTime + 0.1;
-        this.vx *= 3.5; this.vy *= 3.5;
+        
+        // Weaker dash if health is below 30%
+        let hpRatio = this.hp / this.maxHp;
+        let dashMultiplier = (hpRatio < 0.3) ? 2.2 : 3.5; 
+        
+        this.vx *= dashMultiplier; 
+        this.vy *= dashMultiplier;
         createParticles(this.x, this.y, '#00d2ff', 10, 200, 2);
       }
     } else {
@@ -1270,7 +1386,7 @@ function renderMenu() {
     const statText = isMaxed ? `Current: ${formatStat(currentStat)}` : `${formatStat(currentStat)} ➔ ${formatStat(nextStat)}`;
     
     grid.innerHTML += `
-      <div class="glass-panel upgrade-card" style="border-color: ${canAfford ? 'rgba(0,210,255,0.3)' : (isMaxed ? '#ffd700' : 'var(--panel-border)')}">
+      <div class="glass-panel upgrade-card" id="card-${key}" style="border-color: ${canAfford ? 'rgba(0,210,255,0.3)' : (isMaxed ? '#ffd700' : 'var(--panel-border)')}">
         <div class="upg-header">
           <div class="upg-icon">${u.icon}</div>
           <div>
@@ -1302,8 +1418,24 @@ function buyUpgrade(key) {
   if (gold >= cost) {
     gold -= cost;
     u.lvl++;
+    
     saveProgress();
     renderMenu();
+
+    // Trigger ultra epic animation and shimmering badge
+    if (u.lvl >= u.maxLvl) {
+      const cardEl = document.getElementById(`card-${key}`);
+      if (cardEl) {
+        cardEl.classList.add('ultra-max-anim');
+        
+        if (!cardEl.querySelector('.max-badge-pop')) {
+          const badge = document.createElement('div');
+          badge.className = 'max-badge-pop';
+          badge.innerText = '⭐ MAXED OUT! ⭐';
+          cardEl.appendChild(badge);
+        }
+      }
+    }
   }
 }
 
@@ -1326,9 +1458,29 @@ function loadFloor() {
   const floor = FLOORS[currentFloor];
   document.getElementById('floor-title').innerText = `Floor ${currentFloor+1}: ${floor.name}`;
   
+  floorTime = 0; 
+  document.getElementById('anxiety-bar-container').style.display = 'none';
+  document.getElementById('vignette').style.background = 'radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 120%)';
+
   entities = []; projectiles = []; particles = []; texts = []; gems = [];
   player.x = 0; player.y = 0;
   camera.x = 0; camera.y = 0;
+
+  // --- FLOOR MUSIC & RARE TEXT LOGIC ---
+  if (currentFloor === 1) { 
+    playMusic(bgmFiles.floor2);
+  } else if (currentFloor === 2) { 
+    const isRare = Math.random() < 0.20; 
+    playMusic(isRare ? bgmFiles.floor3Rare : bgmFiles.floor3);
+    
+    if (isRare) {
+      // Creates a gold floating text banner above the player when entering Floor 3
+      texts.push(new FloatingText(player.x, player.y - 60, "🎵 RARE TRACK UNLOCKED! 🎵", "#ffd700", true));
+    }
+  } else {
+    stopMusic();
+  }
+  // -------------------------------------
   
   enemiesToSpawn = floor.enemyCount;
   enemiesAlive = enemiesToSpawn;
@@ -1385,6 +1537,8 @@ function updateHUD() {
 
 function triggerLevelUp() {
   state = 'levelup';
+  pauseMusic(); // <-- Pauses the music when level up opens
+  
   const shuffled = [...RUN_BUFFS].sort(() => 0.5 - Math.random());
   const choices = shuffled.slice(0, 3);
   
@@ -1404,6 +1558,7 @@ function triggerLevelUp() {
       updateHUD();
       document.getElementById('lvl-overlay').classList.remove('active');
       state = 'playing';
+      resumeMusic(); // <-- Resumes the music where it left off
       lastTime = performance.now();
       requestAnimationFrame(gameLoop);
     };
@@ -1417,9 +1572,13 @@ function gameOver(isWin) {
   state = 'dead';
   gold += runGold;
   saveProgress();
+
+  stopMusic(); // <-- Stops the background music on death/win
   
   document.getElementById('hud').style.display = 'none';
   document.getElementById('boss-warning').classList.remove('show');
+  document.getElementById('vignette').style.background = 'radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 120%)';
+  
   const overlay = document.getElementById('end-overlay');
   overlay.classList.add('active');
   
@@ -1444,16 +1603,59 @@ function returnToMenu() {
   renderMenu();
 }
 
-// --- MAIN LOOP ---
 function gameLoop(time) {
   if (state !== 'playing') return;
   
+  // --- LOW HEALTH VISUAL & AUDIO MUFFLE CHECK ---
+  if (player) {
+    let hpRatio = player.hp / player.maxHp;
+    updateAudioMuffle(hpRatio < 0.3); // Muffles music if health is low
+
+    // Pulsing red vignette for low health (only if anxiety timer hasn't started yet)
+    if (hpRatio < 0.3 && floorTime < 100) {
+      let lowHpPulse = Math.sin(Date.now() * 0.012) * 0.25 + 0.35;
+      document.getElementById('vignette').style.background = `radial-gradient(circle, transparent 25%, rgba(255, 0, 50, ${lowHpPulse}) 120%)`;
+    } else if (floorTime < 100) {
+      // Reset back to normal vignette when healed above 30%
+      document.getElementById('vignette').style.background = 'radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 120%)';
+    }
+  }
+  // ----------------------------------------------
+
   let dt = Math.min((time - lastTime) / 1000, 0.1);
   lastTime = time;
+  
 
   if (cinematicTimer > 0) {
     cinematicTimer -= dt;
     dt *= 0.15;
+  }
+
+  // --- ANXIETY METER LOGIC & DEATH CHECK (1m 40s to 2 mins) ---
+  floorTime += dt;
+  if (floorTime >= 100) {
+    document.getElementById('anxiety-bar-container').style.display = 'block';
+    
+    // Progress from 0 to 1 over 20 seconds (100s to 120s)
+    let anxietyProgress = Math.min(1, (floorTime - 100) / 20);
+    document.getElementById('anxiety-fill').style.width = `${anxietyProgress * 100}%`;
+    document.getElementById('anxiety-text').innerText = `ANXIETY ${Math.floor(anxietyProgress * 100)}%`;
+
+    // Progressive screen shake getting faster & stronger
+    let shakeIntensity = anxietyProgress * 20 + Math.sin(Date.now() * (0.01 + anxietyProgress * 0.04)) * (anxietyProgress * 12);
+    screenShake = Math.max(screenShake, shakeIntensity);
+
+    // Dynamic crimson vignette pulse effect
+    let pulse = Math.sin(Date.now() * (0.008 + anxietyProgress * 0.025)) * 0.5 + 0.5;
+    document.getElementById('vignette').style.background = `radial-gradient(circle, rgba(255,0,85,${anxietyProgress * 0.35 * pulse}) 20%, rgba(20,0,10,${0.8 + anxietyProgress * 0.2}) 120%)`;
+
+    // Trigger death once anxiety hits 100% at 2 minutes (120 seconds)
+    if (floorTime >= 120) {
+      gameOver(false);
+      return;
+    }
+  } else {
+    document.getElementById('anxiety-bar-container').style.display = 'none';
   }
 
   player.update(dt);
